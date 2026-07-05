@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# SVGs (user drops their own)
+assets/*.svg
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

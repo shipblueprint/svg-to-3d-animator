@@ -102,9 +102,12 @@
         const bodyIndices = new Set([0, 1, 2, 3]);
 
         // --- 4. Synchronized SVG Loading Pipeline ---
+        // 🔧 Change this to your SVG filename (place it in assets/)
+        const SVG_FILE = 'assets/Analytics.svg';
+
         const loader = new SVGLoader();
         
-        loader.load('assets/Analytics.svg', (svgData) => {
+        loader.load(SVG_FILE, (svgData) => {
             const paths = svgData.paths;
             let temporaryGroups = [];
 

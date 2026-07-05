@@ -4,19 +4,21 @@ Turns flat SVGs into 3D extruded animations using Three.js.
 
 ## Usage
 
-1. Place your `.svg` file in the **`assets/`** folder
-2. Open `index.html` and update the filename on line:
+1. Place **one** `.svg` file in the `assets/` folder
+2. Open `index.html` and change the filename near the top:
 
 ```js
-loader.load('assets/your-file.svg', (svgData) => {
+const SVG_FILE = 'assets/your-file.svg';
 ```
 
-3. Open `index.html` in a browser (or serve via live-server / vite)
+3. Serve the page:
 
 ```bash
 npm install
 npm run dev
 ```
+
+> **Single SVG only** — no batch or auto-detect yet. You edit the filename manually.
 
 ## Controls
 
@@ -29,4 +31,4 @@ npm run dev
 ## Notes
 
 - Works best with flat vector illustrations (not complex gradients or raster embeds)
-- Single SVG at a time — no batch support yet
+- SVGs in `assets/` are gitignored — they won't be committed
