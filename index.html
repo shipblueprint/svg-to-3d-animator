@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production 3D Asset Studio Engine - Fixed</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #0d0e12;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-hint {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 21, 26, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 10px 20px;
+            color: #fff;
+            font-family: sans-serif;
+            font-size: 13px;
+            display: flex;
+            gap: 15px;
+            pointer-events: none;
+            z-index: 100;
+        }
+        kbd {
+            background: #2e303f;
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-hint">
+        <div><kbd>P</kbd> Take Transparent PNG</div>
+        <div><kbd>V</kbd> Record WebM Video Loop</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. Scene & Environment Setup ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0d0e12);
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 3000);
+        camera.position.set(0, 0, 750);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.4;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // --- 2. Balanced Clay Studio Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
+        scene.add(ambientLight);
+
+        const frontLight = new THREE.DirectionalLight(0xffffff, 1.4);
+        frontLight.position.set(150, 200, 500);
+        scene.add(frontLight);
+
+        const rimLight = new THREE.DirectionalLight(0xffb3a7, 0.9);
+        rimLight.position.set(-300, -200, -300);
+        scene.add(rimLight);
+
+        // --- 3. Animation Hierarchy Containers ---
+        const masterContainer = new THREE.Group();
+        scene.add(masterContainer);
+
+        let animatedGroups = [];
+        let isAssetReady = false; 
+
+        const stride = 40; 
+        const bodyIndices = new Set([0, 1, 2, 3]);
+
+        // --- 4. Synchronized SVG Loading Pipeline ---
+        const loader = new SVGLoader();
+        
+        loader.load('assets/Analytics.svg', (svgData) => {
+            const paths = svgData.paths;
+            let temporaryGroups = [];
+
+            paths.forEach((path, index) => {
+                const style = path.userData.style;
+                let fillStyle = style && style.fill ? style.fill.toLowerCase().trim() : '';
+                let strokeStyle = style && style.stroke ? style.stroke.toLowerCase().trim() : '';
+
+                // FIX 1: Don't kill stroke-only paths (glasses, outlines, held objects)
+                const isBackground = fillStyle === '#0d0e12' || fillStyle === '#121214';
+                const hasFill = fillStyle && fillStyle !== 'none' && fillStyle !== 'transparent';
+                const hasStroke = strokeStyle && strokeStyle !== 'none' && strokeStyle !== 'transparent';
+                
+                if (isBackground || (!hasFill && !hasStroke)) return;
+
+                // FIX 2: Preserve original SVG colors instead of forcing dark gray
+                let finalColor = '#1a1b23'; // safe fallback
+                
+                if (hasFill && !isBackground) {
+                    finalColor = fillStyle;
+                } else if (hasStroke) {
+                    finalColor = strokeStyle;
+                }
+                
+                // Map pure black to visible dark gray so it doesn't disappear
+                if (finalColor === '#000000' || finalColor === '#000') {
+                    finalColor = '#1a1b23';
+                }
+
+                // Keep body detection for animation only (NOT for color)
+                const isComplexDetail = path.subPaths && path.subPaths.length > 1;
+                const isBody = bodyIndices.has(index) && !isComplexDetail;
+                
+                // Sync motion values 1:1 with your Python logic
+                const amp = isBody ? 12 : 30; 
+                const phase = (index % 2) === 0 ? 0 : Math.floor(stride / 2);
+
+                const threeGroup = new THREE.Group();
+                threeGroup.userData = { 
+                    amp: amp, 
+                    phase: phase, 
+                    isBody: isBody,
+                    initialOrder: index 
+                };
+
+                const shapes = SVGLoader.createShapes(path);
+
+                shapes.forEach(shape => {
+                    const geometry = new THREE.ExtrudeGeometry(shape, {
+                        depth: isBody ? 26 : 12,
+                        bevelEnabled: true,
+                        bevelThickness: isBody ? 3 : 1,
+                        bevelSize: isBody ? 1.2 : 0.4,
+                        bevelSegments: isBody ? 4 : 2
+                    });
+
+                    const material = new THREE.MeshStandardMaterial({
+                        color: new THREE.Color(finalColor),
+                        roughness: isBody ? 0.28 : 0.45,
+                        metalness: isBody ? 0.02 : 0.06
+                    });
+
+                    const mesh = new THREE.Mesh(geometry, material);
+                    
+                    // Layer Z-Stacking Matrix
+                    mesh.position.z = isBody ? (index * 2.0) : (50 + index * 3.5);
+                    
+                    threeGroup.add(mesh);
+                });
+
+                if (threeGroup.children.length > 0) {
+                    temporaryGroups.push(threeGroup);
+                }
+            });
+
+            // Maintain sequential layer indices
+            temporaryGroups.sort((a, b) => a.userData.initialOrder - b.userData.initialOrder);
+
+            // --- PHYSICAL BOX CENTERING SYSTEM ---
+            const globalBounds = new THREE.Box3();
+            temporaryGroups.forEach(grp => {
+                grp.children.forEach(mesh => {
+                    mesh.geometry.computeBoundingBox();
+                    const meshBox = mesh.geometry.boundingBox.clone();
+                    meshBox.applyMatrix4(mesh.matrixWorld);
+                    globalBounds.union(meshBox);
+                });
+            });
+
+            const centerOffset = new THREE.Vector3();
+            globalBounds.getCenter(centerOffset);
+
+            temporaryGroups.forEach(grp => {
+                grp.children.forEach(mesh => {
+                    mesh.position.x -= centerOffset.x;
+                    mesh.position.y -= centerOffset.y;
+                });
+                masterContainer.add(grp);
+            });
+
+            animatedGroups = temporaryGroups;
+            isAssetReady = true;
+        });
+
+        // Mirror orientation safely
+        masterContainer.scale.set(1, -1, 1);
+
+        // --- 5. 1:1 Hermite Walk Animation Interpolator ---
+        const clock = new THREE.Clock();
+
+        function walkEasing(t) {
+            return t * t * (3 - 2 * t);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (!isAssetReady || animatedGroups.length === 0) return;
+
+            const duration = 3.0; 
+            const time = clock.getElapsedTime() % duration;
+            const progress = time / duration;
+
+            animatedGroups.forEach(grp => {
+                const data = grp.userData;
+
+                const currentFrame = (progress * 160 + data.phase) % 160;
+                const stepIndex = Math.floor(currentFrame / 20);
+                const stepProgress = (currentFrame % 20) / 20;
+                const easedValue = walkEasing(stepProgress);
+
+                let targetY = 0;
+
+                if (stepIndex === 0) targetY = THREE.MathUtils.lerp(0, -data.amp, easedValue);
+                else if (stepIndex === 1) targetY = THREE.MathUtils.lerp(-data.amp, 0, easedValue);
+                else if (stepIndex === 2) targetY = THREE.MathUtils.lerp(0, data.amp, easedValue);
+                else if (stepIndex === 3) targetY = THREE.MathUtils.lerp(data.amp, 0, easedValue);
+                else if (stepIndex === 4) targetY = THREE.MathUtils.lerp(0, -data.amp, easedValue);
+                else if (stepIndex === 5) targetY = THREE.MathUtils.lerp(-data.amp, 0, easedValue);
+                else if (stepIndex === 6) targetY = THREE.MathUtils.lerp(0, data.amp, easedValue);
+                else if (stepIndex === 7) targetY = THREE.MathUtils.lerp(data.amp, 0, easedValue);
+
+                grp.position.y = targetY;
+
+                // Apply organic squash deformations to body parts
+                if (data.isBody) {
+                    const scalarStretch = (targetY / 12) * 0.03;
+                    grp.scale.set(1.0 - scalarStretch, 1.0 + scalarStretch, 1.0);
+                }
+            });
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- 6. Quick High-Quality Export Controls ---
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'p') {
+                scene.background = null;
+                renderer.render(scene, camera);
+                const url = renderer.domElement.toDataURL('image/png');
+                const a = document.createElement('a');
+                a.download = 'premium-3d-render.png';
+                a.href = url;
+                a.click();
+                scene.background = new THREE.Color(0x0d0e12);
+            }
+            if (e.key.toLowerCase() === 'v') {
+                scene.background = null;
+                const stream = renderer.domElement.captureStream(60);
+                const recorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
+                const chunks = [];
+                recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.download = 'premium-loop.webm';
+                    a.href = url;
+                    a.click();
+                    scene.background = new THREE.Color(0x0d0e12);
+                };
+                recorder.start();
+                setTimeout(() => { recorder.stop(); }, 3000);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
