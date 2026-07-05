@@ -3,19 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Production 3D Asset Studio Engine - Fixed</title>
+    <title>SVG to 3D Animator</title>
     <style>
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
             background: #0d0e12;
+            font-family: sans-serif;
         }
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
         }
+
+        /* Drop zone overlay */
+        #drop-zone {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #888;
+            font-size: 18px;
+            pointer-events: none;
+            z-index: 10;
+            transition: opacity 0.3s;
+        }
+        #drop-zone.dragover {
+            background: rgba(13, 14, 18, 0.85);
+            border: 3px dashed #FF6B4A;
+            color: #fff;
+            pointer-events: auto;
+        }
+        #drop-zone .big-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+        #drop-zone .sub {
+            font-size: 14px;
+            color: #666;
+            margin-top: 8px;
+        }
+        #drop-zone .or-divider {
+            margin: 14px 0;
+            color: #555;
+        }
+        #drop-zone #file-input {
+            display: none;
+        }
+        #drop-zone .browse-btn {
+            pointer-events: auto;
+            background: #2e303f;
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            padding: 8px 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        #drop-zone .browse-btn:hover {
+            background: #3e4055;
+        }
+        #drop-zone.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #status {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 21, 26, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 8px 18px;
+            color: #aaa;
+            font-size: 13px;
+            z-index: 100;
+            white-space: nowrap;
+        }
+        #status.error {
+            color: #ff6b4a;
+            border-color: #ff6b4a;
+        }
+        #status.loaded {
+            color: #6bff8a;
+            border-color: #6bff8a;
+        }
+
         #ui-hint {
             position: absolute;
             bottom: 20px;
@@ -26,7 +105,6 @@
             border-radius: 8px;
             padding: 10px 20px;
             color: #fff;
-            font-family: sans-serif;
             font-size: 13px;
             display: flex;
             gap: 15px;
@@ -43,9 +121,21 @@
 </head>
 <body>
 
+    <!-- Drop zone (visible until an SVG is loaded) -->
+    <div id="drop-zone">
+        <div class="big-icon">📐</div>
+        <div>Drop an SVG file here</div>
+        <div class="or-divider">— or —</div>
+        <label class="browse-btn" for="file-input">Browse files</label>
+        <input type="file" id="file-input" accept=".svg">
+        <div class="sub">Single SVG only · drag & drop or click to browse</div>
+    </div>
+
+    <div id="status">Drop an SVG to get started</div>
+
     <div id="ui-hint">
-        <div><kbd>P</kbd> Take Transparent PNG</div>
-        <div><kbd>V</kbd> Record WebM Video Loop</div>
+        <div><kbd>P</kbd> Export PNG</div>
+        <div><kbd>V</kbd> Record WebM</div>
     </div>
 
     <script type="importmap">
@@ -62,99 +152,92 @@
         import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // --- 1. Scene & Environment Setup ---
+        // ─── DOM refs ───────────────────────────────────────────
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const statusEl = document.getElementById('status');
+
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = type || '';
+        }
+
+        // ─── Scene ──────────────────────────────────────────────
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x0d0e12);
 
-        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 3000);
+        const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 1, 3000);
         camera.position.set(0, 0, 750);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.toneMappingExposure = 1.4;
-        document.body.appendChild(renderer.domElement);
+        document.body.prepend(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // --- 2. Balanced Clay Studio Lighting ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
-        scene.add(ambientLight);
-
+        // ─── Lighting ───────────────────────────────────────────
+        scene.add(new THREE.AmbientLight(0xffffff, 1.25));
         const frontLight = new THREE.DirectionalLight(0xffffff, 1.4);
         frontLight.position.set(150, 200, 500);
         scene.add(frontLight);
-
         const rimLight = new THREE.DirectionalLight(0xffb3a7, 0.9);
         rimLight.position.set(-300, -200, -300);
         scene.add(rimLight);
 
-        // --- 3. Animation Hierarchy Containers ---
+        // ─── Containers ─────────────────────────────────────────
         const masterContainer = new THREE.Group();
         scene.add(masterContainer);
 
         let animatedGroups = [];
-        let isAssetReady = false; 
-
-        const stride = 40; 
+        let isAssetReady = false;
+        const stride = 40;
         const bodyIndices = new Set([0, 1, 2, 3]);
 
-        // --- 4. Synchronized SVG Loading Pipeline ---
-        // 🔧 Change this to your SVG filename (place it in assets/)
-        const SVG_FILE = 'assets/Analytics.svg';
+        // ─── Build 3D scene from SVG data ──────────────────────
+        function buildFromSVG(svgData, name) {
+            // Clear previous
+            while (masterContainer.children.length) {
+                const child = masterContainer.children[0];
+                child.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+                masterContainer.remove(child);
+            }
+            animatedGroups = [];
+            isAssetReady = false;
 
-        const loader = new SVGLoader();
-        
-        loader.load(SVG_FILE, (svgData) => {
             const paths = svgData.paths;
-            let temporaryGroups = [];
+            if (!paths || paths.length === 0) {
+                setStatus('⚠️ No paths found in SVG', 'error');
+                return;
+            }
 
+            const temporaryGroups = [];
             paths.forEach((path, index) => {
                 const style = path.userData.style;
                 let fillStyle = style && style.fill ? style.fill.toLowerCase().trim() : '';
                 let strokeStyle = style && style.stroke ? style.stroke.toLowerCase().trim() : '';
-
-                // FIX 1: Don't kill stroke-only paths (glasses, outlines, held objects)
                 const isBackground = fillStyle === '#0d0e12' || fillStyle === '#121214';
                 const hasFill = fillStyle && fillStyle !== 'none' && fillStyle !== 'transparent';
                 const hasStroke = strokeStyle && strokeStyle !== 'none' && strokeStyle !== 'transparent';
-                
                 if (isBackground || (!hasFill && !hasStroke)) return;
 
-                // FIX 2: Preserve original SVG colors instead of forcing dark gray
-                let finalColor = '#1a1b23'; // safe fallback
-                
-                if (hasFill && !isBackground) {
-                    finalColor = fillStyle;
-                } else if (hasStroke) {
-                    finalColor = strokeStyle;
-                }
-                
-                // Map pure black to visible dark gray so it doesn't disappear
-                if (finalColor === '#000000' || finalColor === '#000') {
-                    finalColor = '#1a1b23';
-                }
+                let finalColor = '#1a1b23';
+                if (hasFill && !isBackground) finalColor = fillStyle;
+                else if (hasStroke) finalColor = strokeStyle;
+                if (finalColor === '#000000' || finalColor === '#000') finalColor = '#1a1b23';
 
-                // Keep body detection for animation only (NOT for color)
                 const isComplexDetail = path.subPaths && path.subPaths.length > 1;
                 const isBody = bodyIndices.has(index) && !isComplexDetail;
-                
-                // Sync motion values 1:1 with your Python logic
-                const amp = isBody ? 12 : 30; 
+                const amp = isBody ? 12 : 30;
                 const phase = (index % 2) === 0 ? 0 : Math.floor(stride / 2);
 
                 const threeGroup = new THREE.Group();
-                threeGroup.userData = { 
-                    amp: amp, 
-                    phase: phase, 
-                    isBody: isBody,
-                    initialOrder: index 
-                };
+                threeGroup.userData = { amp, phase, isBody, initialOrder: index };
 
                 const shapes = SVGLoader.createShapes(path);
-
                 shapes.forEach(shape => {
                     const geometry = new THREE.ExtrudeGeometry(shape, {
                         depth: isBody ? 26 : 12,
@@ -163,145 +246,185 @@
                         bevelSize: isBody ? 1.2 : 0.4,
                         bevelSegments: isBody ? 4 : 2
                     });
-
                     const material = new THREE.MeshStandardMaterial({
                         color: new THREE.Color(finalColor),
                         roughness: isBody ? 0.28 : 0.45,
                         metalness: isBody ? 0.02 : 0.06
                     });
-
                     const mesh = new THREE.Mesh(geometry, material);
-                    
-                    // Layer Z-Stacking Matrix
                     mesh.position.z = isBody ? (index * 2.0) : (50 + index * 3.5);
-                    
                     threeGroup.add(mesh);
                 });
-
-                if (threeGroup.children.length > 0) {
-                    temporaryGroups.push(threeGroup);
-                }
+                if (threeGroup.children.length > 0) temporaryGroups.push(threeGroup);
             });
 
-            // Maintain sequential layer indices
+            if (temporaryGroups.length === 0) {
+                setStatus('⚠️ No renderable paths found', 'error');
+                return;
+            }
+
             temporaryGroups.sort((a, b) => a.userData.initialOrder - b.userData.initialOrder);
 
-            // --- PHYSICAL BOX CENTERING SYSTEM ---
-            const globalBounds = new THREE.Box3();
+            // Center
+            const bounds = new THREE.Box3();
             temporaryGroups.forEach(grp => {
-                grp.children.forEach(mesh => {
-                    mesh.geometry.computeBoundingBox();
-                    const meshBox = mesh.geometry.boundingBox.clone();
-                    meshBox.applyMatrix4(mesh.matrixWorld);
-                    globalBounds.union(meshBox);
+                grp.children.forEach(m => {
+                    m.geometry.computeBoundingBox();
+                    const box = m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld);
+                    bounds.union(box);
                 });
             });
-
-            const centerOffset = new THREE.Vector3();
-            globalBounds.getCenter(centerOffset);
-
+            const center = new THREE.Vector3();
+            bounds.getCenter(center);
             temporaryGroups.forEach(grp => {
-                grp.children.forEach(mesh => {
-                    mesh.position.x -= centerOffset.x;
-                    mesh.position.y -= centerOffset.y;
-                });
+                grp.children.forEach(m => { m.position.x -= center.x; m.position.y -= center.y; });
                 masterContainer.add(grp);
             });
 
             animatedGroups = temporaryGroups;
             isAssetReady = true;
-        });
+            dropZone.classList.add('hidden');
+            setStatus(`✓ Loaded: ${name}`, 'loaded');
+        }
 
-        // Mirror orientation safely
+        // ─── Load SVG from URL ─────────────────────────────────
+        function loadSVGFromURL(url) {
+            setStatus('Loading…', '');
+            const loader = new SVGLoader();
+            loader.load(
+                url,
+                (data) => {
+                    const name = url.split('/').pop() || url;
+                    buildFromSVG(data, name);
+                },
+                undefined,
+                (err) => {
+                    setStatus(`⚠️ Failed to load: ${url}`, 'error');
+                    console.error(err);
+                }
+            );
+        }
+
+        // ─── Load SVG from File object ─────────────────────────
+        function loadSVGFromFile(file) {
+            if (!file.name.toLowerCase().endsWith('.svg')) {
+                setStatus('⚠️ Not an SVG file', 'error');
+                return;
+            }
+            setStatus('Loading…', '');
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(e.target.result, 'image/svg+xml');
+                const svgEl = doc.querySelector('svg');
+                if (!svgEl) {
+                    setStatus('⚠️ Invalid SVG', 'error');
+                    return;
+                }
+                // Convert to string for SVGLoader
+                const svgString = new XMLSerializer().serializeToString(svgEl);
+                const loader = new SVGLoader();
+                const data = loader.parse(svgString);
+                buildFromSVG(data, file.name);
+            };
+            reader.readAsText(file);
+        }
+
+        // ─── Mirror Y ──────────────────────────────────────────
         masterContainer.scale.set(1, -1, 1);
 
-        // --- 5. 1:1 Hermite Walk Animation Interpolator ---
+        // ─── Animation ─────────────────────────────────────────
         const clock = new THREE.Clock();
-
-        function walkEasing(t) {
-            return t * t * (3 - 2 * t);
-        }
+        function walkEasing(t) { return t * t * (3 - 2 * t); }
 
         function animate() {
             requestAnimationFrame(animate);
+            if (!isAssetReady || animatedGroups.length === 0) { controls.update(); renderer.render(scene, camera); return; }
 
-            if (!isAssetReady || animatedGroups.length === 0) return;
-
-            const duration = 3.0; 
+            const duration = 3.0;
             const time = clock.getElapsedTime() % duration;
             const progress = time / duration;
 
             animatedGroups.forEach(grp => {
                 const data = grp.userData;
-
-                const currentFrame = (progress * 160 + data.phase) % 160;
-                const stepIndex = Math.floor(currentFrame / 20);
-                const stepProgress = (currentFrame % 20) / 20;
-                const easedValue = walkEasing(stepProgress);
-
+                const frame = (progress * 160 + data.phase) % 160;
+                const step = Math.floor(frame / 20);
+                const t = walkEasing((frame % 20) / 20);
                 let targetY = 0;
-
-                if (stepIndex === 0) targetY = THREE.MathUtils.lerp(0, -data.amp, easedValue);
-                else if (stepIndex === 1) targetY = THREE.MathUtils.lerp(-data.amp, 0, easedValue);
-                else if (stepIndex === 2) targetY = THREE.MathUtils.lerp(0, data.amp, easedValue);
-                else if (stepIndex === 3) targetY = THREE.MathUtils.lerp(data.amp, 0, easedValue);
-                else if (stepIndex === 4) targetY = THREE.MathUtils.lerp(0, -data.amp, easedValue);
-                else if (stepIndex === 5) targetY = THREE.MathUtils.lerp(-data.amp, 0, easedValue);
-                else if (stepIndex === 6) targetY = THREE.MathUtils.lerp(0, data.amp, easedValue);
-                else if (stepIndex === 7) targetY = THREE.MathUtils.lerp(data.amp, 0, easedValue);
-
+                if (step === 0) targetY = THREE.MathUtils.lerp(0, -data.amp, t);
+                else if (step === 1) targetY = THREE.MathUtils.lerp(-data.amp, 0, t);
+                else if (step === 2) targetY = THREE.MathUtils.lerp(0, data.amp, t);
+                else if (step === 3) targetY = THREE.MathUtils.lerp(data.amp, 0, t);
+                else if (step === 4) targetY = THREE.MathUtils.lerp(0, -data.amp, t);
+                else if (step === 5) targetY = THREE.MathUtils.lerp(-data.amp, 0, t);
+                else if (step === 6) targetY = THREE.MathUtils.lerp(0, data.amp, t);
+                else if (step === 7) targetY = THREE.MathUtils.lerp(data.amp, 0, t);
                 grp.position.y = targetY;
-
-                // Apply organic squash deformations to body parts
                 if (data.isBody) {
-                    const scalarStretch = (targetY / 12) * 0.03;
-                    grp.scale.set(1.0 - scalarStretch, 1.0 + scalarStretch, 1.0);
+                    const s = (targetY / 12) * 0.03;
+                    grp.scale.set(1 - s, 1 + s, 1);
                 }
             });
-
             controls.update();
             renderer.render(scene, camera);
         }
-
         animate();
 
-        // --- 6. Quick High-Quality Export Controls ---
+        // ─── Export ────────────────────────────────────────────
         window.addEventListener('keydown', (e) => {
             if (e.key.toLowerCase() === 'p') {
                 scene.background = null;
                 renderer.render(scene, camera);
-                const url = renderer.domElement.toDataURL('image/png');
                 const a = document.createElement('a');
-                a.download = 'premium-3d-render.png';
-                a.href = url;
+                a.download = 'svg-3d-render.png';
+                a.href = renderer.domElement.toDataURL('image/png');
                 a.click();
                 scene.background = new THREE.Color(0x0d0e12);
             }
             if (e.key.toLowerCase() === 'v') {
                 scene.background = null;
+                renderer.render(scene, camera);
                 const stream = renderer.domElement.captureStream(60);
                 const recorder = new MediaRecorder(stream, { mimeType: 'video/webm; codecs=vp9' });
                 const chunks = [];
-                recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
+                recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
                 recorder.onstop = () => {
                     const blob = new Blob(chunks, { type: 'video/webm' });
-                    const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
-                    a.download = 'premium-loop.webm';
-                    a.href = url;
+                    a.download = 'svg-3d-loop.webm';
+                    a.href = URL.createObjectURL(blob);
                     a.click();
                     scene.background = new THREE.Color(0x0d0e12);
                 };
                 recorder.start();
-                setTimeout(() => { recorder.stop(); }, 3000);
+                setTimeout(() => recorder.stop(), 3000);
             }
         });
 
+        // ─── Resize ────────────────────────────────────────────
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = innerWidth / innerHeight;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(innerWidth, innerHeight);
         });
+
+        // ─── Drag & Drop ───────────────────────────────────────
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) loadSVGFromFile(file);
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) loadSVGFromFile(fileInput.files[0]);
+        });
+
+        // ─── Try default from assets (ignored if missing) ──────
+        // If you have an SVG in assets/, uncomment and set the name:
+        // loadSVGFromURL('assets/your-file.svg');
     </script>
 </body>
 </html>
