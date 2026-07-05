@@ -4,9 +4,7 @@ Turns flat SVGs into 3D extruded animations using Three.js.
 
 ## Usage
 
-**Drag & drop** any `.svg` file onto the page, or click **Browse** to pick one. No code editing needed.
-
-Alternatively, place an SVG in the `assets/` folder and uncomment the default load line in `index.html`.
+Click **Open SVG** in the top-left and pick any `.svg` file. That's it.
 
 ```bash
 npm install
@@ -23,6 +21,6 @@ npm run dev
 
 ## Notes
 
-- Single SVG at a time — drop a new one to replace
+- Single SVG at a time — open a new one to replace
 - Works best with flat vector illustrations
 - SVGs are gitignored — they won't be committed
